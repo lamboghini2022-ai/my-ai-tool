@@ -3,10 +3,11 @@ from flask_cors import CORS
 import requests
 import os
 
-app = Flask(__name__)
+# Lấy từ Environment Variable trên Render (nếu không có thì mới lấy từ web)
+api_key = os.environ.get('MY_API_KEY') or payload.get('api_key')
 
-# Cho phép tất cả các nguồn (origins) truy cập vào API của bạn
-CORS(app, resources={r"/api/*": {"origins": "*"}})
+if not api_key:
+    return jsonify({"error": {"message": "Thiếu API Key!"}}), 403
 
 # === BỘ TỪ ĐIỂN DỊCH GIAO DIỆN SANG PROMPT (BẰNG TIẾNG ANH) ===
 PROMPT_MAP = {
