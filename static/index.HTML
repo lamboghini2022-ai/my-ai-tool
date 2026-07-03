@@ -1,0 +1,379 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Photo Editor - AI Tool</title>
+    <!-- Tailwind CSS qua CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        /* Tùy chỉnh thanh cuộn */
+        ::-webkit-scrollbar {
+            width: 6px;
+        }
+        ::-webkit-scrollbar-track {
+            background: #1e293b;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #475569;
+            border-radius: 10px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: #64748b;
+        }
+
+        /* Nút Toggle Switch Custom */
+        .toggle-checkbox:checked {
+            right: 0;
+            border-color: #68D391;
+        }
+        .toggle-checkbox:checked + .toggle-label {
+            background-color: #3b82f6;
+        }
+        
+        /* Tùy chỉnh slider (Range input) */
+        input[type=range] {
+            -webkit-appearance: none; 
+            background: transparent; 
+        }
+        input[type=range]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            height: 14px;
+            width: 14px;
+            border-radius: 50%;
+            background: #ffffff;
+            cursor: pointer;
+            margin-top: -5px; 
+            box-shadow: 0 0 2px rgba(0,0,0,0.5);
+        }
+        input[type=range]::-webkit-slider-runnable-track {
+            width: 100%;
+            height: 4px;
+            cursor: pointer;
+            background: #475569;
+            border-radius: 2px;
+        }
+    </style>
+</head>
+<body class="bg-[#0f172a] text-slate-200 h-screen flex flex-col font-sans text-sm overflow-hidden">
+
+    <!-- HEADER & API KEY AREA -->
+    <header class="bg-[#1e293b] border-b border-slate-700 flex justify-between items-center px-4 h-14 shrink-0">
+        <div class="flex space-x-6 h-full">
+            <button class="text-blue-400 border-b-2 border-blue-400 px-2 font-medium h-full flex items-center">Chỉnh sửa một ảnh</button>
+            <button class="text-slate-400 hover:text-slate-200 transition px-2 font-medium h-full flex items-center">Chỉnh sửa hàng loạt</button>
+        </div>
+        
+        <!-- Khu vực gắn API Key lộ ra ngoài -->
+        <div class="flex items-center bg-[#0f172a] rounded-lg border border-slate-600 p-1 pl-3 shadow-inner">
+            <label for="apiKey" class="text-slate-400 font-medium mr-2 flex items-center gap-1">
+                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4"></path></svg>
+                API Key:
+            </label>
+            <input type="text" id="apiKey" class="bg-transparent text-white border-none focus:outline-none w-64 text-sm placeholder-slate-500" placeholder="Nhập mã API của bạn vào đây...">
+            <button class="bg-blue-600 hover:bg-blue-500 text-white px-3 py-1.5 rounded-md text-xs font-semibold transition shadow">Áp dụng</button>
+        </div>
+    </header>
+
+    <!-- MAIN CONTENT -->
+    <main class="flex flex-1 overflow-hidden">
+        
+        <!-- SIDEBAR (LEFT) -->
+        <aside class="w-80 bg-[#1e293b] flex flex-col border-r border-slate-700 shrink-0 relative">
+            <!-- Model Select -->
+            <div class="p-3 grid grid-cols-2 gap-2 shrink-0">
+                <button class="bg-blue-500 text-white border border-blue-500 py-1.5 rounded text-xs font-medium model-btn" onclick="selectOpt('model-btn', this)">Nano Banana</button>
+                <button class="bg-transparent text-slate-300 border border-slate-600 hover:bg-slate-700 py-1.5 rounded text-xs font-medium model-btn" onclick="selectOpt('model-btn', this)">Nano Banana 2 (Pro)</button>
+            </div>
+
+            <div class="flex-1 overflow-y-auto p-3 space-y-3 pb-24">
+                <!-- Accordion 1: Thông tin chủ thể -->
+                <div class="border border-slate-700 rounded bg-[#1e293b] overflow-hidden">
+                    <div class="bg-slate-700/40 px-3 py-2 flex justify-between items-center cursor-pointer hover:bg-slate-700/60 transition" onclick="toggleAcc('acc-info', 'icon-info')">
+                        <span class="font-medium text-xs">Thông tin chủ thể</span>
+                        <span id="icon-info" class="text-slate-400 font-bold transition-transform">×</span>
+                    </div>
+                    <div id="acc-info" class="p-3 space-y-4 text-xs">
+                        <!-- Giới tính -->
+                        <div>
+                            <p class="text-slate-400 mb-2">Giới tính</p>
+                            <div class="grid grid-cols-4 gap-2">
+                                <button class="bg-blue-500 text-white border border-blue-500 py-1.5 rounded gender-btn" onclick="selectOpt('gender-btn', this)">Nữ</button>
+                                <button class="bg-transparent text-slate-300 border border-slate-600 hover:bg-slate-700 py-1.5 rounded gender-btn" onclick="selectOpt('gender-btn', this)">Nam</button>
+                            </div>
+                        </div>
+                        <!-- Đối tượng -->
+                        <div>
+                            <p class="text-slate-400 mb-2">Đối tượng</p>
+                            <div class="grid grid-cols-3 gap-2">
+                                <button class="bg-transparent text-slate-300 border border-slate-600 hover:bg-slate-700 py-1.5 rounded target-btn" onclick="selectOpt('target-btn', this)">Người lớn</button>
+                                <button class="bg-blue-500 text-white border border-blue-500 py-1.5 rounded target-btn" onclick="selectOpt('target-btn', this)">Thanh niên</button>
+                                <button class="bg-transparent text-slate-300 border border-slate-600 hover:bg-slate-700 py-1.5 rounded target-btn" onclick="selectOpt('target-btn', this)">Trẻ em</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Accordion 2: Tùy chỉnh ngoại hình -->
+                <div class="border border-slate-700 rounded bg-[#1e293b] overflow-hidden">
+                    <div class="bg-slate-700/40 px-3 py-2 flex justify-between items-center cursor-pointer hover:bg-slate-700/60 transition" onclick="toggleAcc('acc-look', 'icon-look')">
+                        <span class="font-medium text-xs">Tùy chỉnh ngoại hình</span>
+                        <span id="icon-look" class="text-slate-400 font-bold transition-transform">×</span>
+                    </div>
+                    <div id="acc-look" class="p-3 space-y-4 text-xs">
+                        <!-- Trang phục -->
+                        <div>
+                            <p class="text-slate-400 mb-2">Trang phục</p>
+                            <div class="grid grid-cols-3 gap-2">
+                                <button class="bg-transparent text-slate-300 border border-slate-600 hover:bg-slate-700 py-2 rounded flex flex-col items-center justify-center gap-1 outfit-btn" onclick="selectOpt('outfit-btn', this)">
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" y1="3" x2="12" y2="15"></line></svg>
+                                    Tải lên
+                                </button>
+                                <button class="bg-transparent text-slate-300 border border-slate-600 hover:bg-slate-700 py-1.5 rounded outfit-btn" onclick="selectOpt('outfit-btn', this)">Giữ nguyên</button>
+                                <button class="bg-transparent text-slate-300 border border-slate-600 hover:bg-slate-700 py-1.5 rounded outfit-btn" onclick="selectOpt('outfit-btn', this)">Áo Sơ mi</button>
+                                <button class="bg-transparent text-slate-300 border border-slate-600 hover:bg-slate-700 py-1.5 rounded outfit-btn" onclick="selectOpt('outfit-btn', this)">Áo Sơ mi Trắng</button>
+                                <button class="bg-blue-500 text-white border border-blue-500 py-1.5 rounded outfit-btn" onclick="selectOpt('outfit-btn', this)">Áo Polo</button>
+                                <button class="bg-transparent text-slate-300 border border-slate-600 hover:bg-slate-700 py-1.5 rounded outfit-btn" onclick="selectOpt('outfit-btn', this)">Áo kiểu</button>
+                                <button class="bg-transparent text-slate-300 border border-slate-600 hover:bg-slate-700 py-1.5 rounded outfit-btn" onclick="selectOpt('outfit-btn', this)">Áo phông trơn</button>
+                                <button class="bg-transparent text-slate-300 border border-slate-600 hover:bg-slate-700 py-1.5 rounded outfit-btn" onclick="selectOpt('outfit-btn', this)">Áo Vest</button>
+                                <button class="bg-transparent text-slate-300 border border-slate-600 hover:bg-slate-700 py-1.5 rounded outfit-btn" onclick="selectOpt('outfit-btn', this)">Công sở</button>
+                                <button class="bg-transparent text-slate-300 border border-slate-600 hover:bg-slate-700 py-1.5 rounded outfit-btn" onclick="selectOpt('outfit-btn', this)">Vest nữ công sở 2</button>
+                                <button class="bg-transparent text-slate-300 border border-slate-600 hover:bg-slate-700 py-1.5 rounded outfit-btn" onclick="selectOpt('outfit-btn', this)">Áo trắng & Khăn quàng</button>
+                                <button class="bg-transparent text-slate-300 border border-slate-600 hover:bg-slate-700 py-1.5 rounded outfit-btn" onclick="selectOpt('outfit-btn', this)">Áo dài trắng</button>
+                                <button class="bg-transparent text-slate-300 border border-slate-600 hover:bg-slate-700 py-1.5 rounded outfit-btn" onclick="selectOpt('outfit-btn', this)">Nữ Sinh HQ 1</button>
+                                <button class="bg-transparent text-slate-300 border border-slate-600 hover:bg-slate-700 py-1.5 rounded outfit-btn" onclick="selectOpt('outfit-btn', this)">Nữ Sinh HQ 2</button>
+                                <button class="bg-transparent text-slate-300 border border-slate-600 hover:bg-slate-700 py-1.5 rounded outfit-btn" onclick="selectOpt('outfit-btn', this)">Nữ Sinh HQ 3</button>
+                            </div>
+                        </div>
+
+                        <!-- Prompt input -->
+                        <div>
+                            <p class="text-slate-400 mb-1">Hoặc mô tả trang phục bạn muốn (Prompt)</p>
+                            <div class="relative">
+                                <textarea id="custom-outfit-prompt" class="w-full bg-[#0f172a] border border-slate-600 rounded p-2 text-xs text-slate-300 focus:border-blue-500 focus:outline-none resize-none h-16" placeholder="Ví dụ: áo sơ mi xanh nước biển, cà vạt đỏ"></textarea>
+                                <svg class="absolute bottom-2 right-2 text-slate-500" xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"></path><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"></path></svg>
+                            </div>
+                        </div>
+
+                        <!-- Kiểu tóc -->
+                        <div>
+                            <p class="text-slate-400 mb-2">Kiểu tóc</p>
+                            <div class="grid grid-cols-3 gap-2">
+                                <button class="bg-blue-500 text-white border border-blue-500 py-1.5 rounded hair-btn" onclick="selectOpt('hair-btn', this)">Giữ nguyên</button>
+                                <button class="bg-transparent text-slate-300 border border-slate-600 hover:bg-slate-700 py-1.5 rounded hair-btn" onclick="selectOpt('hair-btn', this)">Gọn gàng</button>
+                                <button class="bg-transparent text-slate-300 border border-slate-600 hover:bg-slate-700 py-1.5 rounded hair-btn" onclick="selectOpt('hair-btn', this)">Tóc ngắn</button>
+                                <button class="bg-transparent text-slate-300 border border-slate-600 hover:bg-slate-700 py-1.5 rounded hair-btn" onclick="selectOpt('hair-btn', this)">Tóc dài</button>
+                                <button class="bg-transparent text-slate-300 border border-slate-600 hover:bg-slate-700 py-1.5 rounded hair-btn" onclick="selectOpt('hair-btn', this)">Tóc dài bồng bềnh</button>
+                                <button class="bg-transparent text-slate-300 border border-slate-600 hover:bg-slate-700 py-1.5 rounded hair-btn" onclick="selectOpt('hair-btn', this)">Thời trang</button>
+                                <button class="bg-transparent text-slate-300 border border-slate-600 hover:bg-slate-700 py-1.5 rounded hair-btn" onclick="selectOpt('hair-btn', this)">Tóc buộc gọn</button>
+                                <button class="bg-transparent text-slate-300 border border-slate-600 hover:bg-slate-700 py-1.5 rounded hair-btn" onclick="selectOpt('hair-btn', this)">Texture Crop NAM</button>
+                                <button class="bg-transparent text-slate-300 border border-slate-600 hover:bg-slate-700 py-1.5 rounded hair-btn" onclick="selectOpt('hair-btn', this)">Rẽ đôi HQ Nam</button>
+                                <button class="bg-transparent text-slate-300 border border-slate-600 hover:bg-slate-700 py-1.5 rounded hair-btn" onclick="selectOpt('hair-btn', this)">Xuân Ngắn Nam</button>
+                                <button class="bg-transparent text-slate-300 border border-slate-600 hover:bg-slate-700 py-1.5 rounded hair-btn" onclick="selectOpt('hair-btn', this)">Hạt Dẻ Ngố Nam</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Accordion 3: Nền & Hiệu ứng -->
+                <div class="border border-slate-700 rounded bg-[#1e293b] overflow-hidden">
+                    <div class="bg-slate-700/40 px-3 py-2 flex justify-between items-center cursor-pointer hover:bg-slate-700/60 transition" onclick="toggleAcc('acc-effect', 'icon-effect')">
+                        <span class="font-medium text-xs">Nền & Hiệu ứng</span>
+                        <span id="icon-effect" class="text-slate-400 font-bold transition-transform">×</span>
+                    </div>
+                    <div id="acc-effect" class="p-3 space-y-4 text-xs">
+                        <!-- Màu nền -->
+                        <div>
+                            <p class="text-slate-400 mb-2">Màu nền</p>
+                            <div class="flex gap-2">
+                                <button class="bg-blue-500 text-white border border-blue-500 px-4 py-1.5 rounded bg-btn" onclick="selectOpt('bg-btn', this)">Xanh</button>
+                                <button class="bg-transparent text-slate-300 border border-slate-600 hover:bg-slate-700 px-4 py-1.5 rounded bg-btn" onclick="selectOpt('bg-btn', this)">Trắng</button>
+                                <button class="bg-transparent text-slate-300 border border-slate-600 hover:bg-slate-700 px-4 py-1.5 rounded bg-btn" onclick="selectOpt('bg-btn', this)">Xám</button>
+                            </div>
+                            <div class="mt-2">
+                                <button class="bg-transparent text-slate-300 border border-slate-600 hover:bg-slate-700 px-4 py-1.5 rounded bg-btn w-full text-left" onclick="selectOpt('bg-btn', this)">Xanh Đậm</button>
+                            </div>
+                        </div>
+
+                        <!-- Làm đẹp da & Sliders -->
+                        <div class="space-y-3">
+                            <div class="flex justify-between items-center">
+                                <span class="font-medium">Làm đẹp da (mịn da, xóa mụn)</span>
+                                <!-- Toggle Switch -->
+                                <div class="relative inline-block w-8 mr-2 align-middle select-none transition duration-200 ease-in">
+                                    <input type="checkbox" name="toggle" id="toggle" class="toggle-checkbox absolute block w-4 h-4 rounded-full bg-white border-4 appearance-none cursor-pointer z-10 transition-transform duration-200 ease-in-out translate-x-4" checked/>
+                                    <label for="toggle" class="toggle-label block overflow-hidden h-4 rounded-full bg-blue-500 cursor-pointer"></label>
+                                </div>
+                            </div>
+                            
+                            <div>
+                                <div class="flex justify-between text-slate-400 mb-1">
+                                    <span>Mức độ làm đẹp</span>
+                                    <span id="beauty-val">50%</span>
+                                </div>
+                                <input type="range" id="beauty-slider" min="0" max="100" value="50" class="w-full" oninput="document.getElementById('beauty-val').innerText = this.value + '%'">
+                            </div>
+
+                            <div>
+                                <div class="flex justify-between text-slate-400 mb-1">
+                                    <span>Mức độ sáng da</span>
+                                    <span id="bright-val">50%</span>
+                                </div>
+                                <input type="range" id="bright-slider" min="0" max="100" value="50" class="w-full" oninput="document.getElementById('bright-val').innerText = this.value + '%'">
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Accordion 4: Tùy chọn khác -->
+                <div class="border border-slate-700 rounded bg-[#1e293b] overflow-hidden">
+                    <div class="bg-slate-700/40 px-3 py-2 flex justify-between items-center cursor-pointer hover:bg-slate-700/60 transition" onclick="toggleAcc('acc-other', 'icon-other')">
+                        <span class="font-medium text-xs">Tùy chọn khác</span>
+                        <span id="icon-other" class="text-slate-400 font-bold transition-transform rotate-45">+</span>
+                    </div>
+                    <div id="acc-other" class="p-3 text-xs hidden">
+                        <p class="text-slate-400">Các tùy chọn bổ sung sẽ hiển thị ở đây...</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Bottom Buttons (Fixed in Sidebar) -->
+            <div class="p-3 border-t border-slate-700 bg-[#1e293b] grid grid-cols-2 gap-3 shrink-0 absolute bottom-0 w-80 h-16">
+                <button class="bg-slate-700 hover:bg-slate-600 text-white border border-slate-600 rounded text-xs font-medium transition">Ảnh khác</button>
+                <button id="btn-recreate" class="bg-blue-600 hover:bg-blue-500 text-white rounded text-xs font-bold transition shadow-lg py-2">Tạo lại ảnh</button>
+            </div>
+        </aside>
+
+        <!-- MAIN PREVIEW AREA (RIGHT) -->
+        <section class="flex-1 bg-[#0f172a] relative flex flex-col p-4">
+            
+            <!-- Icon Expand ở góc trái -->
+            <button class="absolute top-6 left-6 bg-blue-500 text-white p-1.5 rounded shadow z-10 hover:bg-blue-600">
+                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 3 21 3 21 9"></polyline><polyline points="9 21 3 21 3 15"></polyline><line x1="21" y1="3" x2="14" y2="10"></line><line x1="3" y1="21" x2="10" y2="14"></line></svg>
+            </button>
+
+            <!-- Khung chứa ảnh -->
+            <div id="image-container" class="flex-1 bg-[#1e293b] rounded-lg border border-slate-700 flex items-center justify-center overflow-hidden relative shadow-lg">
+                <div class="w-full h-full flex flex-col items-center justify-center bg-slate-800 text-slate-500">
+                     <svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1" stroke-linecap="round" stroke-linejoin="round" class="mb-4 opacity-50"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><circle cx="8.5" cy="8.5" r="1.5"></circle><polyline points="21 15 16 10 5 21"></polyline></svg>
+                     <p>Khu vực hiển thị ảnh sau khi xử lý</p>
+                </div>
+            </div>
+
+            <!-- Thanh thông báo trạng thái / lỗi (Status Bar) -->
+            <div id="status-bar" class="mt-4 bg-[#1e293b] border border-slate-700 rounded p-2 px-4 text-xs font-mono text-slate-400">
+                Sẵn sàng xử lý ảnh. Hãy chọn thông số và nhấn "Tạo lại ảnh".
+            </div>
+        </section>
+
+    </main>
+
+    <!-- JAVASCRIPT XỬ LÝ LOGIC VÀ KẾT NỐI API BACKEND -->
+    <script>
+        // 1. HÀM XỬ LÝ GIAO DIỆN (Chọn nút, Đóng/mở menu, Switch)
+        function selectOpt(groupClass, clickedBtn) {
+            const buttons = document.querySelectorAll('.' + groupClass);
+            buttons.forEach(btn => {
+                // Đưa các nút khác về mặc định
+                btn.classList.remove('bg-blue-500', 'text-white', 'border-blue-500');
+                btn.classList.add('bg-transparent', 'text-slate-300', 'border-slate-600');
+            });
+            // Bôi xanh nút được chọn
+            clickedBtn.classList.remove('bg-transparent', 'text-slate-300', 'border-slate-600');
+            clickedBtn.classList.add('bg-blue-500', 'text-white', 'border-blue-500');
+        }
+
+        function toggleAcc(contentId, iconId) {
+            const content = document.getElementById(contentId);
+            const icon = document.getElementById(iconId);
+            
+            if (content.classList.contains('hidden')) {
+                content.classList.remove('hidden');
+                if(icon.innerText === '+') {
+                    icon.classList.remove('rotate-45');
+                    icon.innerText = '×';
+                }
+            } else {
+                content.classList.add('hidden');
+                if(icon.innerText === '×') {
+                    icon.innerText = '+';
+                    icon.classList.add('rotate-45');
+                }
+            }
+        }
+
+        const toggleCheckbox = document.getElementById('toggle');
+        toggleCheckbox.addEventListener('change', function() {
+            if(this.checked) {
+                this.classList.add('translate-x-4');
+                this.classList.remove('translate-x-0');
+            } else {
+                this.classList.remove('translate-x-4');
+                this.classList.add('translate-x-0');
+            }
+        });
+
+        // 2. HÀM KẾT NỐI VỚI BACKEND (main.py)
+        document.getElementById('btn-recreate').addEventListener('click', async function() {
+            // Lấy các tham số từ giao diện
+            const apiKey = document.getElementById('apiKey').value;
+            const statusBar = document.getElementById('status-bar');
+            
+            // Gom dữ liệu từ các nút đang có màu xanh (.bg-blue-500)
+            const model = document.querySelector('.model-btn.bg-blue-500')?.innerText || '';
+            const gender = document.querySelector('.gender-btn.bg-blue-500')?.innerText || '';
+            const target = document.querySelector('.target-btn.bg-blue-500')?.innerText || '';
+            const outfit = document.querySelector('.outfit-btn.bg-blue-500')?.innerText || '';
+            const hair = document.querySelector('.hair-btn.bg-blue-500')?.innerText || '';
+            const background = document.querySelector('.bg-btn.bg-blue-500')?.innerText || '';
+            
+            // Lấy dữ liệu Textarea và Sliders
+            const customOutfit = document.getElementById('custom-outfit-prompt').value;
+            const smoothSkin = document.getElementById('toggle').checked;
+            const beautyLevel = document.getElementById('beauty-slider').value;
+            const brightLevel = document.getElementById('bright-slider').value;
+
+            // Đóng gói thành JSON
+            const payload = {
+                api_key: apiKey,
+                model: model,
+                gender: gender,
+                target: target,
+                outfit: outfit,
+                custom_outfit: customOutfit,
+                hair: hair,
+                background: background,
+                smooth_skin: smoothSkin,
+                beauty_level: beautyLevel,
+                brightness_level: brightLevel
+            };
+
+            // Hiển thị trạng thái đang xử lý
+            statusBar.innerHTML = '<span class="text-yellow-400">Đang gửi dữ liệu lên server backend để xử lý...</span>';
+
+            try {
+                // Gọi tới backend Flask
+                const response = await fetch('/api/generate', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+
+                const result = await response.json();
+
+                if (!response.ok) {
+                    // Nếu lỗi (ví dụ API key sai / không có permission)
+                    statusBar.innerHTML = `<span class="text-red-400">got status: ${result.error.code} ${result.error.status}. ${JSON.stringify(result)}</span>`;
+                } else {
+                    // Nếu thành công
+                    statusBar.innerHTML = `<span class="text-green-400">Thành công! Prompt đã tạo: ${result.prompt_used}</span>`;
+                    document.getElementById('image-container').innerHTML = `<img src="${result.image_url}" class="w-full h-full object-contain">`;
+                }
+            } catch (error) {
+                // Nếu không kết nối được tới server Python
+                statusBar.innerHTML = `<span class="text-red-400">Lỗi kết nối tới Server: Bạn đã chạy file main.py chưa? Lỗi chi tiết: ${error.message}</span>`;
+            }
+        });
+    </script>
+</body>
+</html>
