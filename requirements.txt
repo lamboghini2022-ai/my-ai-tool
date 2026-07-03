@@ -4,6 +4,5 @@ pydantic
 tenacity
 cachetools
 Pillow
-opencv-python-headless
 replicate
 gunicorn
