@@ -1,9 +1,9 @@
 Flask==3.0.0
-flask-cors==4.0.0
-pydantic==2.5.2
-tenacity==8.2.3
-cachetools==5.3.2
-Pillow==10.1.0
-opencv-python-headless==4.8.1.78
-replicate==0.21.1
-gunicorn==21.2.0
+flask-cors
+pydantic
+tenacity
+cachetools
+Pillow
+opencv-python-headless
+replicate
+gunicorn
