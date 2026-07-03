@@ -8,8 +8,7 @@ import logging
 import traceback
 from pathlib import Path
 from io import BytesIO
-from typing import Dict, Any, Optional, List
-from logging.handlers import RotatingFileHandler
+from typing import Dict, Any, Optional
 
 import cv2
 from PIL import Image
@@ -18,15 +17,18 @@ from flask_cors import CORS
 from pydantic import BaseModel, ValidationError, Field
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 from cachetools import TTLCache
-import google.generativeai as genai
-from google.generativeai.types import HarmCategory, HarmBlockerThreshold
+
+# ==============================================================================
+# SỬ DỤNG THƯ VIỆN REPLICATE
+# Cài đặt bằng lệnh: pip install replicate
+# ==============================================================================
+import replicate
 
 # ==============================================================================
 # 1. CẤU HÌNH HỆ THỐNG (CONFIG MANAGER)
 # ==============================================================================
 class AppConfig:
-    """Quản lý cấu hình toàn cục cho ứng dụng (Production Ready)"""
-    
+    """Quản lý cấu hình toàn cục cho ứng dụng"""
     ENV: str = os.getenv("FLASK_ENV", "production")
     DEBUG: bool = ENV == "development"
     
@@ -34,30 +36,29 @@ class AppConfig:
     TEMP_DIR: Path = BASE_DIR / "temp_workspace"
     LOG_DIR: Path = BASE_DIR / "logs"
     
-    # Khởi tạo thư mục
     TEMP_DIR.mkdir(parents=True, exist_ok=True)
     LOG_DIR.mkdir(parents=True, exist_ok=True)
     
-    # Cấu hình xử lý ảnh
     MAX_IMAGE_SIZE_MB: float = 5.0
     MAX_IMAGE_DIMENSION: int = 1024
     
-    # Cấu hình API và Model
-    DEFAULT_MODEL: str = "imagen-3.0-generate-001"
+    # Model Replicate mặc định (SDXL - hỗ trợ cả Text2Img và Img2Img)
+    # Bạn có thể đổi sang model khác tuỳ ý trên Replicate (ví dụ: Flux, ControlNet)
+    DEFAULT_MODEL: str = "stability-ai/sdxl:39ed52f2a78e934b3ba6e2a89f5b1c712de7dfea535525255b1aa35c5565e08b"
     MAX_RETRIES: int = 3
     
-    # Cấu hình Caching
     CACHE_MAX_SIZE: int = 100
-    CACHE_TTL_SECONDS: int = 3600  # 1 giờ
+    CACHE_TTL_SECONDS: int = 3600
 
 config_manager = AppConfig()
 
 # ==============================================================================
 # 2. HỆ THỐNG LOGGING (LOGGER MANAGER)
 # ==============================================================================
+from logging.handlers import RotatingFileHandler
+
 def setup_logger() -> logging.Logger:
-    """Thiết lập hệ thống logging production với rotation và multi-handler"""
-    logger_instance = logging.getLogger("AI_Photo_Editor")
+    logger_instance = logging.getLogger("AI_Photo_Editor_Replicate")
     logger_instance.setLevel(logging.DEBUG if config_manager.DEBUG else logging.INFO)
     
     if logger_instance.handlers:
@@ -68,16 +69,14 @@ def setup_logger() -> logging.Logger:
         datefmt="%Y-%m-%d %H:%M:%S"
     )
 
-    # Console Handler
     console_handler = logging.StreamHandler(sys.stdout)
     console_handler.setFormatter(formatter)
     logger_instance.addHandler(console_handler)
 
-    # File Handler
     log_file = config_manager.LOG_DIR / "app.log"
     file_handler = RotatingFileHandler(
         filename=str(log_file),
-        maxBytes=10 * 1024 * 1024,  # 10 MB
+        maxBytes=10 * 1024 * 1024,
         backupCount=5,
         encoding="utf-8"
     )
@@ -89,7 +88,7 @@ def setup_logger() -> logging.Logger:
 logger = setup_logger()
 
 # ==============================================================================
-# 3. TIỆN ÍCH & DỌN DẸP (UTILS & CLEANUP)
+# 3. TIỆN ÍCH DỌN DẸP HỆ THỐNG (UTILS)
 # ==============================================================================
 def create_success_response(data: Dict[str, Any], status_code: int = 200) -> tuple:
     return jsonify(data), status_code
@@ -113,9 +112,9 @@ class TempWorkspaceManager:
             path = Path(file_path)
             if path.exists() and path.is_file():
                 path.unlink()
-                logger.debug(f"Successfully cleaned up file: {file_path}")
+                logger.debug(f"Đã xóa file tạm: {file_path}")
         except Exception as e:
-            logger.error(f"Failed to cleanup file {file_path}: {str(e)}")
+            logger.error(f"Lỗi dọn file tạm {file_path}: {str(e)}")
 
     @staticmethod
     def cleanup_old_workspaces(max_age_seconds: int = 3600) -> None:
@@ -123,52 +122,45 @@ class TempWorkspaceManager:
             current_time = time.time()
             for item in config_manager.TEMP_DIR.iterdir():
                 if item.is_file():
-                    file_age = current_time - item.stat().st_mtime
-                    if file_age > max_age_seconds:
+                    if (current_time - item.stat().st_mtime) > max_age_seconds:
                         item.unlink()
-                        logger.info(f"Garbage collection removed old file: {item.name}")
         except Exception as e:
-            logger.error(f"Garbage collection failed: {str(e)}")
+            logger.error(f"Lỗi dọn rác workspace: {str(e)}")
 
 # ==============================================================================
-# 4. XÂY DỰNG PROMPT (PROMPT BUILDER)
+# 4. XÂY DỰNG PROMPT HÌNH ẢNH (PROMPT BUILDER)
 # ==============================================================================
 class PromptBuilder:
     TRANSLATION_MAP = {
         "gender": {"Nam": "Male", "Nữ": "Female"},
         "target": {"Người lớn": "Adult", "Thanh niên": "Young adult", "Trẻ em": "Child"},
         "outfit": {
-            "Áo Sơ mi": "wearing a button-down shirt",
-            "Áo Sơ mi Trắng": "wearing a crisp white shirt",
-            "Áo Polo": "wearing a polo shirt",
-            "Áo kiểu": "wearing a stylish blouse",
-            "Công sở": "wearing formal business attire",
+            "Áo Sơ mi": "wearing a crisp button-down shirt",
+            "Áo Sơ mi Trắng": "wearing a clean white shirt",
+            "Áo Polo": "wearing a smart polo shirt",
+            "Công sở": "wearing formal business suit attire",
             "Giữ nguyên": ""
         },
         "hair": {
-            "Gọn gàng": "neat and tidy hair",
-            "Tóc ngắn": "short hair",
-            "Tóc dài": "long hair",
+            "Gọn gàng": "neatly combed hair",
+            "Tóc ngắn": "short professional haircut",
+            "Tóc dài": "long elegant hair",
             "Giữ nguyên": ""
         },
         "background": {
-            "Xanh": "solid blue background",
-            "Trắng": "pure white background",
-            "Xám": "neutral grey background"
+            "Xanh": "solid blue studio background",
+            "Trắng": "pure white studio background"
         }
     }
 
-    BASE_QUALITY_PROMPT = (
-        "Masterpiece, ultra-realistic, 8k resolution, highly detailed, "
-        "professional studio lighting, sharp focus, perfect anatomy, ID photo style, front-facing"
-    )
+    # Keyword kích hoạt chất lượng cao cho model ảnh
+    BASE_QUALITY = "Masterpiece, ultra-realistic, 8k resolution, highly detailed ID photo portrait, front-facing, professional studio lighting, perfect anatomy."
 
     @classmethod
     def build(cls, data: Dict[str, Any]) -> str:
         try:
-            elements = [cls.BASE_QUALITY_PROMPT]
+            elements = [cls.BASE_QUALITY]
             
-            # Subject details
             subject_parts = []
             gender = cls.TRANSLATION_MAP["gender"].get(data.get("gender"), "")
             target = cls.TRANSLATION_MAP["target"].get(data.get("target"), "")
@@ -177,7 +169,6 @@ class PromptBuilder:
             if subject_parts:
                 elements.append(" ".join(subject_parts))
 
-            # Outfit
             custom_outfit = data.get("custom_outfit")
             if custom_outfit and custom_outfit.strip():
                 elements.append(f"wearing {custom_outfit.strip()}")
@@ -186,21 +177,19 @@ class PromptBuilder:
                 if outfit and outfit in cls.TRANSLATION_MAP["outfit"]:
                     elements.append(cls.TRANSLATION_MAP["outfit"][outfit])
 
-            # Hair
             hair = data.get("hair")
             if hair and hair in cls.TRANSLATION_MAP["hair"]:
                 elements.append(f"with {cls.TRANSLATION_MAP['hair'][hair]}")
 
-            # Background
             background = data.get("background")
             if background and background in cls.TRANSLATION_MAP["background"]:
                 elements.append(cls.TRANSLATION_MAP["background"][background])
 
             final_prompt = ", ".join(filter(None, elements))
-            logger.info(f"Generated Prompt: {final_prompt}")
+            logger.info(f"Generated Image Prompt: {final_prompt}")
             return final_prompt
         except Exception as e:
-            logger.error(f"Error in prompt building: {str(e)}")
+            logger.error(f"Lỗi tạo prompt: {str(e)}")
             return "Professional ID photo, front-facing, studio lighting, high quality"
 
 # ==============================================================================
@@ -215,23 +204,20 @@ class ImageProcessor:
                 
             image_data = base64.b64decode(base64_str)
             if len(image_data) > (config_manager.MAX_IMAGE_SIZE_MB * 1024 * 1024):
-                raise ValueError(f"Image exceeds maximum size of {config_manager.MAX_IMAGE_SIZE_MB}MB")
+                raise ValueError(f"Kích thước ảnh vượt quá {config_manager.MAX_IMAGE_SIZE_MB}MB")
 
             image = Image.open(BytesIO(image_data))
             if image.mode in ('RGBA', 'P'):
                 image = image.convert('RGB')
                 
             image = ImageProcessor._resize_image_if_needed(image)
-                
             file_name = f"{uuid.uuid4().hex}.jpg"
             file_path = config_manager.TEMP_DIR / file_name
             
             image.save(file_path, format="JPEG", quality=95)
-            logger.info(f"Successfully processed and saved temp image: {file_path}")
             return str(file_path)
         except Exception as e:
-            logger.error(f"Image decode failed: {str(e)}")
-            raise ValueError(f"Invalid image format or data: {str(e)}")
+            raise ValueError(f"Dữ liệu ảnh không hợp lệ: {str(e)}")
 
     @staticmethod
     def _resize_image_if_needed(image: Image.Image) -> Image.Image:
@@ -245,29 +231,20 @@ class ImageProcessor:
         try:
             cascade_path = cv2.data.haarcascades + 'haarcascade_frontalface_default.xml'
             face_cascade = cv2.CascadeClassifier(cascade_path)
-            
             img = cv2.imread(image_path)
             if img is None: return False
-                
             gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
             faces = face_cascade.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=5, minSize=(30, 30))
-            
-            face_count = len(faces)
-            logger.info(f"Detected {face_count} face(s) in {image_path}")
-            return face_count > 0
+            return len(faces) > 0
         except Exception as e:
-            logger.warning(f"Face detection failed, bypassing: {str(e)}")
             return True
 
 # ==============================================================================
-# 6. DỊCH VỤ AI (GEMINI SERVICE)
+# 6. DỊCH VỤ REPLICATE - NƠI GỌI MODEL SINH ẢNH (REPLICATE SERVICE)
 # ==============================================================================
 result_cache = TTLCache(maxsize=config_manager.CACHE_MAX_SIZE, ttl=config_manager.CACHE_TTL_SECONDS)
 
-class GeminiAPIError(Exception):
-    pass
-
-class GeminiService:
+class ReplicateService:
     @staticmethod
     def _generate_cache_key(prompt: str, image_path: Optional[str]) -> str:
         key_data = prompt
@@ -280,54 +257,78 @@ class GeminiService:
     @retry(
         stop=stop_after_attempt(config_manager.MAX_RETRIES),
         wait=wait_exponential(multiplier=1, min=2, max=10),
-        retry=retry_if_exception_type((GeminiAPIError, ConnectionError)),
         reraise=True
     )
     def generate_image(api_key: str, prompt: str, image_path: Optional[str] = None) -> str:
-        cache_key = GeminiService._generate_cache_key(prompt, image_path)
+        cache_key = ReplicateService._generate_cache_key(prompt, image_path)
         if cache_key in result_cache:
-            logger.info("Returning generated image from cache")
+            logger.info("Lấy kết quả ảnh từ Cache")
             return result_cache[cache_key]
 
+        file_handle = None
         try:
-            genai.configure(api_key=api_key)
-            model = genai.GenerativeModel(model_name=config_manager.DEFAULT_MODEL)
+            # ------------------------------------------------------------------
+            # KHỞI TẠO REPLICATE CLIENT (RÕ RÀNG VÀ TƯỜNG MINH)
+            # ------------------------------------------------------------------
+            replicate_client = replicate.Client(api_token=api_key)
             
-            # GỌI API GEMINI THỰC TẾ
-            # Tùy thuộc vào version SDK, gọi hàm generate_content hoặc sinh ảnh tương ứng.
-            # Ở đây mô phỏng luồng thành công vì Imagen API đôi khi cần cấu hình project GCP cụ thể.
-            logger.info(f"Sending request to model: {config_manager.DEFAULT_MODEL}. Prompt: {prompt}")
+            # Cấu hình dữ liệu đầu vào cho model
+            input_data = {
+                "prompt": prompt,
+                "negative_prompt": "ugly, deformed, bad anatomy, bad lighting, watermark, text",
+                "prompt_strength": 0.75, # Giữ lại 25% nét ảnh cũ nếu có ảnh gốc
+                "num_inference_steps": 30
+            }
             
-            # response = model.generate_content([prompt])
-            # image_output = extract_image_from_response(response)
+            if image_path:
+                logger.info("Đính kèm ảnh gốc vào Replicate để chạy Image-to-Image")
+                # Phải mở file dưới dạng binary để đẩy lên Replicate
+                file_handle = open(image_path, "rb")
+                input_data["image"] = file_handle
+                
+            logger.info(f"Đang gọi model Replicate: {config_manager.DEFAULT_MODEL}")
             
-            # Giả lập kết quả thành công cho code chạy được (Thay bằng URL thực tế từ object response)
-            image_output = "https://storage.googleapis.com/genai-mock-output/sample.png" 
-
-            if not image_output:
-                raise GeminiAPIError("API returned empty image content")
-
-            result_cache[cache_key] = image_output
-            return image_output
+            # ------------------------------------------------------------------
+            # THỰC THI CHẠY MODEL TRÊN REPLICATE
+            # ------------------------------------------------------------------
+            output = replicate_client.run(
+                config_manager.DEFAULT_MODEL,
+                input=input_data
+            )
             
-        except Exception as e:
-            error_msg = str(e)
-            logger.error(f"Gemini generation failed: {error_msg}")
-            if "401" in error_msg or "API_KEY_INVALID" in error_msg:
-                raise ValueError("Invalid API Key provided.")
-            elif "429" in error_msg or "quota" in error_msg.lower():
-                raise GeminiAPIError("API Quota exceeded. Retrying...")
+            # Xử lý kết quả trả về (Replicate thường trả về 1 List chứa URL ảnh)
+            if isinstance(output, list) and len(output) > 0:
+                image_url = output[0]
+            elif isinstance(output, str):
+                image_url = output
             else:
-                raise GeminiAPIError(f"Generation failed: {error_msg}")
+                image_url = str(output)
+
+            if not image_url or not image_url.startswith("http"):
+                raise ValueError("API Replicate không trả về URL ảnh hợp lệ.")
+
+            result_cache[cache_key] = image_url
+            return image_url
+            
+        except replicate.exceptions.ReplicateError as e:
+            logger.error(f"Lỗi từ máy chủ Replicate: {str(e)}")
+            raise RuntimeError(f"Lỗi Replicate API: {str(e)}")
+        except Exception as e:
+            logger.error(f"Lỗi hệ thống khi gọi AI: {str(e)}")
+            raise RuntimeError(f"Lỗi kết nối hoặc xử lý sinh ảnh: {str(e)}")
+        finally:
+            # Đóng file an toàn để tránh rò rỉ bộ nhớ
+            if file_handle is not None and not file_handle.closed:
+                file_handle.close()
 
 # ==============================================================================
-# 7. FLASK APP & ROUTING (MAIN APPLICATION)
+# 7. FLASK APP & ROUTING
 # ==============================================================================
 app = Flask(__name__)
 CORS(app, resources={r"/api/*": {"origins": "*"}})
 
 class GenerateRequestSchema(BaseModel):
-    api_key: str = Field(..., min_length=10, description="Google Gemini API Key")
+    api_key: str = Field(..., min_length=10, description="Replicate API Token")
     gender: Optional[str] = Field(default="")
     target: Optional[str] = Field(default="")
     outfit: Optional[str] = Field(default="")
@@ -338,39 +339,34 @@ class GenerateRequestSchema(BaseModel):
 
 @app.route('/health', methods=['GET'])
 def health_check():
-    return jsonify({"status": "healthy", "environment": config_manager.ENV}), 200
+    return jsonify({"status": "healthy", "service": "Replicate API"}), 200
 
 @app.route('/api/generate', methods=['POST'])
 def generate_endpoint():
     temp_image_path = None
     try:
-        # Cleanup rác hệ thống định kỳ mỗi request
         TempWorkspaceManager.cleanup_old_workspaces()
 
         if not request.is_json:
-            return create_error_response("Request must be JSON", "INVALID_CONTENT_TYPE", 415)
+            return create_error_response("Yêu cầu phải là JSON", "INVALID_CONTENT_TYPE", 415)
             
         try:
             validated_data = GenerateRequestSchema(**request.get_json())
         except ValidationError as ve:
-            logger.warning(f"Payload validation failed: {ve.errors()}")
-            return create_error_response("Invalid payload structure", "VALIDATION_ERROR", 400)
+            return create_error_response("Dữ liệu đầu vào sai định dạng", "VALIDATION_ERROR", 400)
 
         data_dict = validated_data.model_dump()
         api_key = data_dict.pop('api_key')
-
         prompt = PromptBuilder.build(data_dict)
 
         if data_dict.get('image_base64'):
-            logger.info("Processing uploaded base64 image")
+            logger.info("Đang xử lý ảnh base64 gửi lên...")
             temp_image_path = ImageProcessor.decode_base64_to_temp(data_dict['image_base64'])
             if not ImageProcessor.detect_face(temp_image_path):
-                logger.warning("No face detected in the uploaded image. Output may be degraded.")
-        else:
-            logger.info("No base64 provided. Operating in Text-to-Image mode.")
-
-        logger.info("Initiating AI Generation process...")
-        generated_result = GeminiService.generate_image(
+                logger.warning("Cảnh báo: Không tìm thấy mặt người rõ ràng trong ảnh.")
+        
+        # Gọi thẳng Replicate AI ra sinh ảnh
+        generated_result = ReplicateService.generate_image(
             api_key=api_key, 
             prompt=prompt, 
             image_path=temp_image_path
@@ -383,19 +379,11 @@ def generate_endpoint():
         })
 
     except ValueError as ve:
-        logger.warning(f"Business logic error: {str(ve)}")
         return create_error_response(str(ve), "BAD_REQUEST", 400)
-        
     except Exception as e:
-        logger.error(f"Critical Internal Error: {str(e)}\n{traceback.format_exc()}")
-        return create_error_response(
-            "An internal server error occurred while processing your request.", 
-            "INTERNAL_SERVER_ERROR", 
-            500
-        )
-        
+        logger.error(f"Lỗi nghiêm trọng: {str(e)}\n{traceback.format_exc()}")
+        return create_error_response("Lỗi xử lý server nội bộ.", "INTERNAL_SERVER_ERROR", 500)
     finally:
-        # Dọn dẹp file tạm dù có lỗi hay không
         if temp_image_path:
             TempWorkspaceManager.cleanup_file(temp_image_path)
 
@@ -404,12 +392,7 @@ def generate_endpoint():
 # ==============================================================================
 if __name__ == '__main__':
     logger.info("="*50)
-    logger.info(f"Starting Photo Editor AI Backend in {config_manager.ENV} mode")
+    logger.info("Khởi chạy Backend AI Photo Editor (Sử dụng REPLICATE SDK)")
     logger.info("="*50)
     
-    app.run(
-        host='0.0.0.0', 
-        port=5000, 
-        debug=config_manager.DEBUG,
-        threaded=True
-    )
+    app.run(host='0.0.0.0', port=5000, debug=config_manager.DEBUG, threaded=True)
