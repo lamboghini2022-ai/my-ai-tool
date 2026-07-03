@@ -2,15 +2,23 @@ from flask import Flask, request, jsonify
 from flask_cors import CORS
 import requests
 import os
+@app.post("/api/extract") 
+async def extract_text(req: ExtractRequest):
+    print("\n========== BẮT ĐẦU XỬ LÝ YÊU CẦU OCR ==========")
+    
+    api_key = os.getenv("MY_API_KEY")
+    if not api_key:
+        print("[LỖI] Thiếu cấu hình API_KEY")
+        return JSONResponse(
+            status_code=500, 
+            content={"error": "Chưa cấu hình biến môi trường API_KEY trên Render."}
+        )
 
-# Lấy từ Environment Variable trên Render (nếu không có thì mới lấy từ web)
-api_key = os.environ.get('MY_API_KEY') or payload.get('api_key')
+    model_name = "gemini-2.5-flash"
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={api_key}"
 
-if not api_key:
-    return jsonify({"error": {"message": "Thiếu API Key!"}}), 403
-
-# === BỘ TỪ ĐIỂN DỊCH GIAO DIỆN SANG PROMPT (BẰNG TIẾNG ANH) ===
-PROMPT_MAP = {
+    # PROMPT MỚI: Đồng bộ 100% với Frontend (Yêu cầu trả về mảng Object visual/spoken)
+    PROMPT_TEXT = {
     "gender": {"Nữ": "female", "Nam": "male"},
     "target": {"Người lớn": "adult", "Thanh niên": "young adult in their 20s", "Trẻ em": "child"},
     "outfit": {
