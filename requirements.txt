@@ -6,3 +6,4 @@ cachetools
 Pillow
 replicate
 gunicorn
+pip install PyPDF2 Pillow
