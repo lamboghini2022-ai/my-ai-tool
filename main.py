@@ -1,24 +1,24 @@
-from fastapi import FastAPI, HTTPException, Header
-from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
-import requests
-from PIL import Image, ImageEnhance
+import os
 import io
 import base64
+import requests
+from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
+from PIL import Image, ImageEnhance
 
-# Khởi tạo ứng dụng FastAPI
 app = FastAPI()
 
-# Cấu hình CORS để cho phép file giao diện HTML (Frontend) gọi tới máy chủ này
+# Cho phép giao diện web gửi dữ liệu lên server Render
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"], # Trên Render, cho phép mọi nguồn truy cập
+    allow_origins=["*"], 
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# Cấu trúc dữ liệu nhận từ giao diện web gửi lên
+# Khung chứa dữ liệu mà Render sẽ nhận từ index.html (Không còn cần API Key ở đây)
 class YeuCauAnh(BaseModel):
     gioi_tinh: str = "Nữ"
     doi_tuong: str = "Người lớn"
@@ -28,92 +28,99 @@ class YeuCauAnh(BaseModel):
     thanh_truot_lam_dep: int = 50
     thanh_truot_do_sang: int = 50
 
-# Từ điển dịch tiếng Việt sang tiếng Anh cho AI hiểu
+# Từ điển dịch dữ liệu sang tiếng Anh
 ANH_XA_GIOI_TINH = { "Nữ": "female", "Nam": "male" }
 ANH_XA_DOI_TUONG = { "Người lớn": "adult", "Thanh niên": "young adult", "Trẻ em": "child" }
 ANH_XA_NEN = { "Xanh": "blue", "Trắng": "white", "Xám": "gray", "Xanh Đậm": "dark navy blue" }
 
-# Hàm tạo câu lệnh Prompt tiếng Anh
+# Hàm lắp ráp câu prompt gửi cho mô hình AI
 def tao_cau_lenh_prompt(du_lieu: YeuCauAnh) -> str:
-    # Xử lý mức độ làm đẹp da
-    cum_tu_lam_dep = "natural skin, visible pores, realistic texture"
+    cum_tu_lam_dep = "natural skin, realistic texture"
     if du_lieu.thanh_truot_lam_dep >= 80:
-        cum_tu_lam_dep = "(flawless smooth skin, blemish-free, airbrushed skin:1.3)"
+        cum_tu_lam_dep = "(flawless smooth skin, airbrushed:1.3)"
     elif du_lieu.thanh_truot_lam_dep >= 50:
         cum_tu_lam_dep = "smooth skin, clear complexion"
 
-    # Dịch dữ liệu
     gioi_tinh_tieng_anh = ANH_XA_GIOI_TINH.get(du_lieu.gioi_tinh, "person")
     doi_tuong_tieng_anh = ANH_XA_DOI_TUONG.get(du_lieu.doi_tuong, "adult")
     nen_tieng_anh = ANH_XA_NEN.get(du_lieu.nen_anh, "solid")
 
-    # Dịch trang phục và kiểu tóc (nếu người dùng không nhập gì thì để trống)
-    trang_phuc_tieng_anh = du_lieu.trang_phuc if du_lieu.trang_phuc != "Giữ nguyên" else "current clothes"
-    kieu_toc_tieng_anh = du_lieu.kieu_toc if du_lieu.kieu_toc != "Giữ nguyên" else "current hairstyle"
+    trang_phuc = du_lieu.trang_phuc if du_lieu.trang_phuc != "Giữ nguyên" else "current clothes"
+    kieu_toc = du_lieu.kieu_toc if du_lieu.kieu_toc != "Giữ nguyên" else "current hairstyle"
 
     return (f"A professional studio portrait photography of a {doi_tuong_tieng_anh} {gioi_tinh_tieng_anh}, "
-            f"front-facing, looking directly at the camera. The subject is wearing {trang_phuc_tieng_anh}. "
-            f"The subject has {kieu_toc_tieng_anh}. Standing in front of a solid {nen_tieng_anh} background. "
-            f"{cum_tu_lam_dep}. Masterpiece, 8k resolution, photorealistic, hyper-detailed skin.")
+            f"front-facing, looking directly at the camera. Wearing {trang_phuc}. "
+            f"Hairstyle: {kieu_toc}. Standing in front of a solid {nen_tieng_anh} background. "
+            f"{cum_tu_lam_dep}. Masterpiece, 8k resolution, photorealistic, RAW photo.")
 
-# Hàm API Xử lý ảnh
+# Khu vực Render nhận dữ liệu và gọi API xử lý ảnh
 @app.post("/api/xu-ly-anh")
-async def xu_ly_anh(du_lieu: YeuCauAnh, authorization: str = Header(None)):
-    # 1. Kiểm tra API Key
-    if not authorization:
-        raise HTTPException(status_code=403, detail="Vui lòng nhập API Key (HuggingFace Token) trên giao diện!")
+async def xu_ly_anh(du_lieu: YeuCauAnh):
     
-    # Chuẩn hóa chuẩn Bearer Token cho HuggingFace
-    if not authorization.startswith("Bearer "):
-        authorization = f"Bearer {authorization}"
+    # 1. LẤY API KEY TỪ BIẾN MÔI TRƯỜNG TRÊN RENDER (Tên biến: GEMIN_AI)
+    api_key = os.environ.get("GEMIN_AI")
+    
+    # Kiểm tra xem bạn đã cấu hình biến GEMIN_AI trên Render chưa
+    if not api_key:
+        raise HTTPException(
+            status_code=500, 
+            detail="Lỗi cấu hình máy chủ: Chưa thiết lập biến môi trường GEMIN_AI trên Render."
+        )
 
-    # 2. Tạo câu lệnh
     prompt_hoan_chinh = tao_cau_lenh_prompt(du_lieu)
-    print("Đang xử lý với Prompt:", prompt_hoan_chinh)
+    print("Prompt sẽ gửi cho AI:", prompt_hoan_chinh)
 
-    # 3. Gửi tới Hugging Face (Mô hình Text-to-Image / Inpainting)
-    duong_dan_api = "https://api-inference.huggingface.co/models/runwayml/stable-diffusion-v1-5"
-    tieu_de_headers = {"Authorization": authorization}
+    # 2. ĐƯỜNG DẪN TỚI MÔ HÌNH AI CỦA BẠN
+    duong_dan_api_ai = "https://dia-chi-api-stable-diffusion-cua-ban.com/sdapi/v1/img2img"
     
-    # Payload gửi lên AI
+    # Gắn API Key (GEMIN_AI) vào Header để gửi đi cho máy chủ AI
+    tieu_de_headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json"
+    }
+    
+    # Gói dữ liệu cấu hình ảnh gửi đi
     du_lieu_gui_ai = {
-        "inputs": prompt_hoan_chinh
+        "prompt": prompt_hoan_chinh,
+        "negative_prompt": "ugly, disfigured, low quality, blurry, deformed face, bad anatomy",
+        "steps": 25,
+        "width": 512,
+        "height": 512,
+        "denoising_strength": 0.7 
     }
 
     try:
-        phan_hoi = requests.post(duong_dan_api, headers=tieu_de_headers, json=du_lieu_gui_ai)
+        # 3. Gửi lệnh cho AI thực thi
+        phan_hoi = requests.post(duong_dan_api_ai, headers=tieu_de_headers, json=du_lieu_gui_ai)
         
-        # Bắt lỗi nếu API Key sai hoặc bị giới hạn
         if phan_hoi.status_code != 200:
-            loi_chi_tiet = phan_hoi.json().get("error", "Lỗi không xác định")
-            print("Lỗi từ HuggingFace:", loi_chi_tiet)
-            raise HTTPException(status_code=phan_hoi.status_code, detail=loi_chi_tiet)
+            raise HTTPException(status_code=phan_hoi.status_code, detail=f"AI báo lỗi: {phan_hoi.text}")
 
-        # Lấy file ảnh dưới dạng byte
-        du_lieu_anh_raw = phan_hoi.content
+        # 4. Nhận ảnh về và xử lý
+        ket_qua_json = phan_hoi.json()
+        chuoi_base64_tu_ai = ket_qua_json['images'][0]
+
+        du_lieu_anh_raw = base64.b64decode(chuoi_base64_tu_ai)
         hinh_anh = Image.open(io.BytesIO(du_lieu_anh_raw))
 
-        # 4. Xử lý độ sáng
         if du_lieu.thanh_truot_do_sang != 50:
-            he_so_anh_sang = du_lieu.thanh_truot_do_sang / 50.0
-            hinh_anh = ImageEnhance.Brightness(hinh_anh).enhance(he_so_anh_sang)
+            he_so = du_lieu.thanh_truot_do_sang / 50.0
+            hinh_anh = ImageEnhance.Brightness(hinh_anh).enhance(he_so)
 
-        # 5. Chuyển ảnh sang Base64 để gửi về HTML
-        bo_dem_du_lieu = io.BytesIO()
-        hinh_anh.save(bo_dem_du_lieu, format="JPEG")
-        chuoi_ma_hoa_base64 = base64.b64encode(bo_dem_du_lieu.getvalue()).decode("utf-8")
+        # 5. Đóng gói Base64 trả về cho web
+        bo_dem = io.BytesIO()
+        hinh_anh.save(bo_dem, format="JPEG")
+        chuoi_base64_cuoi_cung = base64.b64encode(bo_dem.getvalue()).decode("utf-8")
 
         return {
             "thanh_cong": True,
-            "hinh_anh": f"data:image/jpeg;base64,{chuoi_ma_hoa_base64}",
-            "thong_bao": "Đã xử lý ảnh thành công!"
+            "hinh_anh": f"data:image/jpeg;base64,{chuoi_base64_cuoi_cung}"
         }
 
     except Exception as e:
-        print("Lỗi hệ thống:", str(e))
-        raise HTTPException(status_code=500, detail=f"Lỗi hệ thống: {str(e)}")
+        print("Lỗi tại máy chủ Render:", str(e))
+        raise HTTPException(status_code=500, detail=f"Lỗi Render: {str(e)}")
 
-# Khởi chạy server
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)
