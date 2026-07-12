@@ -1,9 +1,5 @@
-Flask==3.0.0
-flask-cors
+fastapi
+uvicorn
 pydantic
-tenacity
-cachetools
+requests
 Pillow
-replicate
-gunicorn
-pip install PyPDF2 Pillow
