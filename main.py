@@ -105,7 +105,7 @@ async def xu_ly_anh_chuyen_sau(
         )
 
         # 5. GỌI MÔ HÌNH: Đã đổi sang Imagen 4 Ultra theo đúng hạn mức 0/25 của bạn
-        model_name = 'imagen-4.0-ultra-generate-001' 
+        model_name = 'imagen-4.0-ultra-generate' 
         
         response = client.models.generate_content(
             model=model_name,
