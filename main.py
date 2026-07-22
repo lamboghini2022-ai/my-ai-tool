@@ -112,7 +112,7 @@ async def xu_ly_anh_chuyen_sau(
         # 5. GỌI MÔ HÌNH (Sử dụng model theo yêu cầu của bạn)
         # Lưu ý: 'gemini-3.1-flash-image' là tên bạn đặt. Nếu Google báo lỗi không tìm thấy model,
         # hệ thống sẽ tự động dùng tên chuẩn của Google là 'imagen-3.0-generate-002'
-        model_name = 'gemini-3.1-flash-image' 
+        model_name = 'imagen-4.0-ultra-generate-001' 
         
         response = client.models.generate_content(
             model=model_name,
